@@ -1492,18 +1492,47 @@ class King (KQRBN_Piece):
         '''Imagines making the given move, then evaluates whether in check in the
         resulting board position. Should be careful to not to alter the game board position
         permanently, this is an imagined move, not yet an actual move.'''
-        temp_game = self.game.copy() # make a copy of the game to imagine move
-        temp_game.make_move(move) # make the move in the game copy
-        other_side_moves = temp_game.get_moves_for(allow_own_king_checked=True)
-        other_side_dest_squares = [move.destination_square for move in other_side_moves]
-        for other_side_dest in other_side_dest_squares:
-            if temp_game.board[other_side_dest]==self.char:
-                # The other side has a piece which can move to a board location which is 
-                # occupied by the same character as self.char.  Therefore, the King would be 
-                # in check after the proposed move. 
-                return True
-        # If no other side piece could potentially move to the king's square, then he must not be in check
-        return False
+        # Instead of copying the whole game for every candidate move, apply the move
+        # directly to the real game and restore the exact prior state afterwards.
+        # The check evaluation itself is identical to the copy-based approach, because
+        # it only depends on the board array and side to move after the move is made.
+        game = self.game
+        # Snapshot every piece of mutable game state that make_move() can touch
+        saved_board_array = game.board.board_array.copy()
+        saved_ep_square = game.ep_square
+        saved_castling_state = game.castling_state.copy()
+        saved_side_to_move = game.side_to_move
+        saved_move_counter = game.move_counter
+        saved_half_moves_since = game.half_moves_since
+        saved_white_pieces = game.white_pieces
+        saved_black_pieces = game.black_pieces
+        saved_move_history_length = len(game.move_history)
+        try:
+            game.make_move(move) # make the move in place (restored below)
+            other_side_moves = game.get_moves_for(allow_own_king_checked=True)
+            other_side_dest_squares = [move.destination_square for move in other_side_moves]
+            king_in_check = False
+            for other_side_dest in other_side_dest_squares:
+                if game.board[other_side_dest]==self.char:
+                    # The other side has a piece which can move to a board location which is 
+                    # occupied by the same character as self.char.  Therefore, the King would be 
+                    # in check after the proposed move. 
+                    king_in_check = True
+                    break
+        finally:
+            # Restore the pre-move state exactly, even if the move or the move
+            # generation failed partway through (e.g. an illegal candidate move)
+            game.board.board_array = saved_board_array
+            game.ep_square = saved_ep_square
+            game.castling_state = saved_castling_state
+            game.side_to_move = saved_side_to_move
+            game.move_counter = saved_move_counter
+            game.half_moves_since = saved_half_moves_since
+            game.white_pieces = saved_white_pieces
+            game.black_pieces = saved_black_pieces
+            del game.move_history[saved_move_history_length:]
+        # If no other side piece could potentially move to the king's square, then he is not in check
+        return king_in_check
         
 
     def is_in_check(self):
